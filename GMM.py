@@ -12,6 +12,7 @@ import numpy as np
 from random import randint
 #for Gaussian
 from scipy.stats import multivariate_normal
+from collections import Counter
 
 
 K = 2
@@ -156,7 +157,7 @@ def responsibility(example, cluster, means, covs, priors):
     normalization = 0
     likelihood = multivariate_normal(means[cluster],covs[cluster]).pdf(example)
     for k in range(len(means)):
-        normalization += multivariate_normal(means[k], covs[k]).pdf(example)
+        normalization += priors[k]*multivariate_normal(means[k], covs[k]).pdf(example)
 
     return priors[cluster]*likelihood/normalization
 
@@ -197,13 +198,13 @@ def GMMmaximization(data, numK, responsibilities):
     # calculate new covariance matricies
     covs = list()
     for cluster in range(numK):
-        cov = covariance(data, responsibilities, mean[cluster])
+        cov = covariance(data, responsibilities, means[cluster])
         covs.append(cov/Ns[cluster])
 
     # calculate new priors
     priors = list()
     for cluster in range(numK):
-        priors.append(Ns[cluster]/numK)
+        priors.append(Ns[cluster]/len(data))
 
 
     return means, covs, priors
