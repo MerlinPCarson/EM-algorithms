@@ -3,7 +3,7 @@
 ##  CS446, Spring 2018    ##
 ##  k-means EM-algorithm  ##
  ##########################
-
+import sys
 import matplotlib.pyplot as plt
 from matplotlib import style
 from matplotlib.cm import rainbow
@@ -13,6 +13,7 @@ from random import randint
 #for Gaussian
 from scipy.stats import multivariate_normal
 from collections import Counter
+from math import log
 
 
 K = 2
@@ -176,12 +177,12 @@ def GMMexpectation(data, means, covs, priors):
     return responsibilities
 
 
-def GMMmaximization(data, numK, responsibilities):
+def GMMmaximization(data, responsibilities):
     
    
     # calculate N of k
     Ns = list()
-    for cluster in range(numK):
+    for cluster in range(K):
         Nk  = 0
         for example in range(len(data)):
             Nk += responsibilities[example][cluster]
@@ -189,7 +190,7 @@ def GMMmaximization(data, numK, responsibilities):
 
     # calculate new means
     means = list()
-    for cluster in range(numK):
+    for cluster in range(K):
         mean = np.zeros([2])
         for example in range(len(data)):
             mean += responsibilities[example][cluster] * data[example]
@@ -197,13 +198,13 @@ def GMMmaximization(data, numK, responsibilities):
 
     # calculate new covariance matricies
     covs = list()
-    for cluster in range(numK):
+    for cluster in range(K):
         cov = covariance(data, responsibilities, means[cluster])
         covs.append(cov/Ns[cluster])
 
     # calculate new priors
     priors = list()
-    for cluster in range(numK):
+    for cluster in range(K):
         priors.append(Ns[cluster]/len(data))
 
 
@@ -211,9 +212,16 @@ def GMMmaximization(data, numK, responsibilities):
 
 
 def loglikelihood(data, means, covs, priors):
-    clusters = list()
-
-    return clusters
+    #clusters = list()
+    llikelihood = 0
+    for example in data:
+        posterior = 0
+        for cluster in range(K):
+            posterior += priors[cluster]*multivariate_normal(means[cluster],covs[cluster]).pdf(example)
+        llikelihood += log(posterior)
+    
+    print llikelihood
+    return llikelihood
 
 
 ########################################
@@ -266,6 +274,9 @@ for _iter in range(iterations):
 
     print 'number of iterations: ', times
     
+    # display clusters and centroids
+    #plot(centroids, clusters)
+    
     ##############################
     #Start Gaussian Mixture Model
     ##############################
@@ -274,6 +285,7 @@ for _iter in range(iterations):
     means, covs, priors = GMMinitialize(clusters)
     
     times = 0
+    llikelihood = 0
     converged = False
     # run EM steps MAX_TIMES or until the centroids are finished moving
     while times < MAX_TIMES and not converged:
@@ -287,13 +299,29 @@ for _iter in range(iterations):
         responsibilities = GMMexpectation(data, means, covs, priors)
 
         # update parameters
-        means, covs, priors = GMMmaximization(data, K, responsibilities)
+        means, covs, priors = GMMmaximization(data, responsibilities)
 
-        # determine cluster for each datum
-        clusters = loglikelihood(data, means, covs, priors)
-    
+        # determine log likelihood
+        prev_llikelihood = llikelihood
+        llikelihood = loglikelihood(data, means, covs, priors)
+        if abs(llikelihood - prev_llikelihood) < THRESHOLD:
+            converged = True
+
         times += 1
+
+    # display parameters
+    print 'Means-\n\n', 
+    for mean in means:
+        print mean, '\n'
+    print 'Covariance Matricies-\n '
+    for cov in covs:
+        for entry in cov:
+            print entry
+        print
+    print 'Priors-\n'
+    for prior in priors:
+        print prior, '\n'
     
     # display clusters and centroids
-    plot(centroids, clusters)
+    #plot(centroids, clusters)
 
