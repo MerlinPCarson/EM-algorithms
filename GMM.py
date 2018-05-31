@@ -14,12 +14,16 @@ from random import randint
 from scipy.stats import multivariate_normal
 from collections import Counter
 from math import log
+import math
+
 
 
 K = 2
 MAX_TIMES = 100
 THRESHOLD = 0.001
-TRAINING_SIZE = 100
+TRAINING_SIZE = 1500
+MIN_BUBBLE_EXAMPLES = TRAINING_SIZE * 0.1 # If a bubble has less data, reset algorithm
+GMM_RANDOM_INIT = False#True    # Randomly init GMM or init using k-means clusters
 
 # plot all data
 #def plot(data):
@@ -53,6 +57,15 @@ def plot(centroids, clusters):
     # display graph
     plt.legend(fontsize="small")
     plt.show()
+
+
+def init_clusters():
+    # create list for data in each cluster
+    clusters = {}
+    for cluster in range(K):
+        clusters[cluster] = list()
+
+    return clusters
 
 
 # randomly intialize centroids
@@ -113,26 +126,40 @@ def GMMinitialize(clusters):
     priors = list()
     totalSize = 0
 
-    #calculate total number(N) of data points
-    for cluster in clusters:
-        totalSize += len(clusters[cluster])
+    # use k-means clusters for inititial parameters
+    if not GMM_RANDOM_INIT:
+        #calculate total number(N) of data points
+        for cluster in clusters:
+            totalSize += len(clusters[cluster])
 
-    #calculate the means of each cluster
-    for cluster in clusters:
-        means.append(np.sum(clusters[cluster], axis = 0)/ len(clusters[cluster]))
-        cov = np.zeros([2,2])
-        for example in clusters[cluster]:
-            term2 = np.array(example-means[cluster])[None]
-            term1 = np.transpose(term2)
-            cov += np.matmul(term1, term2)
-        covs.append(cov/len(clusters[cluster]))
+        #calculate the means of each cluster
+        for cluster in clusters:
+            means.append(np.sum(clusters[cluster], axis = 0)/ len(clusters[cluster]))
+            cov = np.zeros([2,2])
+            for example in clusters[cluster]:
+                term2 = np.array(example-means[cluster])[None]
+                term1 = np.transpose(term2)
+                cov += np.matmul(term1, term2)
+            covs.append(cov/len(clusters[cluster]))
             
-    #calculate the covariance matricies
+        #calculate the covariance matricies
 
-    #calculate the priors for each cluster
-    for cluster in clusters:
-        #print len(clusters[cluster])
-        priors.append(float(len(clusters[cluster]))/totalSize)
+        #calculate the priors for each cluster
+        for cluster in clusters:
+            #print len(clusters[cluster])
+            priors.append(float(len(clusters[cluster]))/totalSize)
+
+    #means = np.array([[0,0], [1,1]])
+    #covs = np.array([[[0,0],[0,0]],[[1,1],[1,1]]]) 
+    #priors = np.array([0.5,0.5])
+    
+    else:
+        # randomly initialize parameters
+        for cluster in range(K):
+            means.append(np.random.randn(2))
+            A = np.random.randn(2,2)
+            covs.append(np.dot(A,A.transpose()))
+            priors.append(float(1)/K)
 
     #print means
     #print covs
@@ -153,19 +180,32 @@ def covariance(data, responsibilites, mean):
 
     return cov
 
+def mv_normal(example, mean, cov):
+    normalization = 1/(2*math.pi*np.linalg.det(cov)**(1/2))
+    sub =  np.array(example - mean)
+    trans = np.transpose(np.array(sub)[None])
+    inverse = np.linalg.inv(cov)
+    term2 = np.array(np.dot(inverse,sub))
+    term1 = np.reshape(trans,2)
+    exp = np.matmul(term1,term2)
+    value = math.exp(-1/2*exp)
+    return normalization * value
 
 def responsibility(example, cluster, means, covs, priors):
     normalization = 0
-    likelihood = multivariate_normal(means[cluster],covs[cluster]).pdf(example)
+    #likelihood = mv_normal(example,means[cluster], covs[cluster])
+    #likelihood = multivariate_normal(means[cluster],covs[cluster]).pdf(example)
+    likelihood = multivariate_normal.pdf(example,means[cluster],covs[cluster])
     for k in range(len(means)):
         normalization += priors[k]*multivariate_normal(means[k], covs[k]).pdf(example)
 
     return priors[cluster]*likelihood/normalization
 
 
-def GMMexpectation(data, means, covs, priors):
+def GMMexpectation(data, clusters, means, covs, priors):
     responsibilities = list()
 
+    # calculate responsiblities
     for example in data:
         gammaK = list()
         for cluster in clusters:
@@ -173,6 +213,10 @@ def GMMexpectation(data, means, covs, priors):
 
         # create array of responsibilities 
         responsibilities.append(gammaK)
+
+    for example in range(len(data)):
+        idx = np.argmax(responsibilities[example])
+        clusters[idx].append(data[example])
 
     return responsibilities
 
@@ -211,6 +255,7 @@ def GMMmaximization(data, responsibilities):
     return means, covs, priors
 
 
+# calculate log likelihood of the algorithm
 def loglikelihood(data, means, covs, priors):
     #clusters = list()
     llikelihood = 0
@@ -222,6 +267,17 @@ def loglikelihood(data, means, covs, priors):
     
     print llikelihood
     return llikelihood
+
+
+# determines if any clusters are too small 
+def check_bubble_sizes(bubbles, minSize):
+
+    for bubble in bubbles:
+        if len(bubbles[bubble]) < minSize:
+            print (len(bubbles[bubble]), ' in a cluster, resetting!')
+            return True
+
+    return False
 
 
 ########################################
@@ -242,9 +298,7 @@ for _iter in range(iterations):
     # dictionary for the centroids
     centroids = {}
     # create list for data in each centroid
-    clusters = {}
-    for centroid in range(K):
-        clusters[centroid] = list()
+    clusters = init_clusters()
 
     initialize(data, centroids)
     
@@ -272,42 +326,50 @@ for _iter in range(iterations):
         # check change in distance threshold to determine when to stop
         converged = threshold(centroids, prev_centroids, THRESHOLD)
 
-    print 'number of iterations: ', times
+    print 'Converged after {} iterations.'.format(times)
     
     # display clusters and centroids
     #plot(centroids, clusters)
     
+    # clear out centroids, not needed for GMM
+    centroids = {}
+
     ##############################
     #Start Gaussian Mixture Model
     ##############################
 
-    # inizialize parameters
-    means, covs, priors = GMMinitialize(clusters)
+    reset = True
+
+    while reset:
+        reset = False
+
+        # inizialize parameters
+        means, covs, priors = GMMinitialize(clusters)
     
-    times = 0
-    llikelihood = 0
-    converged = False
-    # run EM steps MAX_TIMES or until the centroids are finished moving
-    while times < MAX_TIMES and not converged:
+        times = 0
+        llikelihood = 0
+        converged = False
+        # run EM steps MAX_TIMES or until the centroids are finished moving
+        while times < MAX_TIMES and not converged and not reset:
 
-        # initialize data structures for cluster data
-        clusters = {}
-        for cluster in range(K):
-            clusters[cluster] = list()
+            # initialize data structures for cluster data
+            bubbles = init_clusters()
 
-        # caluculate log likely hood to classify
-        responsibilities = GMMexpectation(data, means, covs, priors)
+            # caluculate log likely hood to classify
+            responsibilities = GMMexpectation(data, clusters, means, covs, priors)
 
-        # update parameters
-        means, covs, priors = GMMmaximization(data, responsibilities)
+            # update parameters
+            means, covs, priors = GMMmaximization(data, responsibilities)
 
-        # determine log likelihood
-        prev_llikelihood = llikelihood
-        llikelihood = loglikelihood(data, means, covs, priors)
-        if abs(llikelihood - prev_llikelihood) < THRESHOLD:
-            converged = True
+            # determine log likelihood
+            prev_llikelihood = llikelihood
+            llikelihood = loglikelihood(data, means, covs, priors)
+            if abs(llikelihood - prev_llikelihood) < THRESHOLD:
+                converged = True
 
-        times += 1
+            reset = check_bubble_sizes(bubbles, MIN_BUBBLE_EXAMPLES)
+
+            times += 1
 
     # display parameters
     print 'Means-\n\n', 
@@ -323,5 +385,5 @@ for _iter in range(iterations):
         print prior, '\n'
     
     # display clusters and centroids
-    #plot(centroids, clusters)
+    plot(centroids, bubbles)
 
