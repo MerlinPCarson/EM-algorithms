@@ -7,14 +7,16 @@ import sys
 import matplotlib.pyplot as plt
 from matplotlib import style
 from matplotlib.cm import rainbow
+from matplotlib import patches
 style.use('ggplot')
 import numpy as np
-from random import randint
+import random
 #for Gaussian
 from scipy.stats import multivariate_normal
 from collections import Counter
 from math import log
 import math
+
 
 
 
@@ -24,11 +26,6 @@ THRESHOLD = 0.001
 TRAINING_SIZE = 1500
 MIN_BUBBLE_EXAMPLES = TRAINING_SIZE * 0.1 # If a bubble has less data, reset algorithm
 GMM_RANDOM_INIT = False#True    # Randomly init GMM or init using k-means clusters
-
-# plot all data
-#def plot(data):
-#    plt.scatter(data[:,0], data[:,1], s=10)
-#    plt.show()
 
 
 #
@@ -73,7 +70,7 @@ def initialize(data, centroids):
     tmpData = list(data)
 
     for centroid in range(K):
-        selection = randint(0,K)
+        selection = random.randint(0,K)
         centroids[centroid] = tmpData[selection]
         tmpData = np.delete(tmpData,selection, axis=0)
     
@@ -114,10 +111,49 @@ def predict(example, centroids):
     distances = [np.linalg.norm(example-centroids[centroid]) for centroid in centroids]
     return distances.index(min(distances))
 
+# calculate the error
+def MSE(clusters, centroids):
+
+    mse = 0
+    for cluster in clusters:
+        for example in range(len(clusters[cluster])):
+            mse += np.linalg.norm(example-centroids[cluster])
+
+    return mse
 
 #
 # Gaussian Mixure Models functions
 #############################
+
+def plot_GMM(clusters, means, covs):
+    print ('Plotting...')
+    colors = iter(rainbow(np.linspace(0, 1, 3)))
+
+    plt.subplot()
+    ax = plt.gca()
+    plt.xlabel('X1')
+    plt.ylabel('X2')
+    plt.title('Gaussian Mixture Model With K = '+ str(K))
+    for cluster in clusters:
+        cluster_color = next(colors)
+        eigvals, eigvecs = np.linalg.eigh(covs[cluster])
+        eigvals = 3. * np.sqrt(2.) * np.sqrt(eigvals)
+        u = eigvecs[0]/np.linalg.norm(eigvecs[0])
+        angle = np.arctan(u[1]/u[0])
+        angle = 180. * angle/np.pi
+        ellipse = patches.Ellipse(xy=means[cluster], width=eigvals[0],
+                            height=eigvals[1], angle=180.+angle, color=cluster_color, linewidth=0.5, alpha=0.5)
+        ax.add_artist(ellipse)
+        for example in clusters[cluster]:
+            plt.scatter(example[0], example[1], marker = "x", color = cluster_color,  linewidths=5, s=5) 
+
+    plt.show()
+
+def plot_llikelihood(llikelihood):
+    plt.xlabel('Iterations')
+    plt.ylabel('Log Likelihood')
+    plt.plot(llikelihood)
+    plt.show()
 
 def GMMinitialize(clusters):
 
@@ -149,9 +185,6 @@ def GMMinitialize(clusters):
             #print len(clusters[cluster])
             priors.append(float(len(clusters[cluster]))/totalSize)
 
-    #means = np.array([[0,0], [1,1]])
-    #covs = np.array([[[0,0],[0,0]],[[1,1],[1,1]]]) 
-    #priors = np.array([0.5,0.5])
     
     else:
         # randomly initialize parameters
@@ -161,22 +194,17 @@ def GMMinitialize(clusters):
             covs.append(np.dot(A,A.transpose()))
             priors.append(float(1)/K)
 
-    #print means
-    #print covs
-    #print priors
-
+    print_params(means,covs,priors)
     return means, covs, priors
 
-def gaussian(example, mean, cov, prior):
-    pass
-
-
-def covariance(data, responsibilites, mean):
+def covariance(data, responsibilites, mean, cluster):
     cov = np.zeros([2,2])
-    for example in data:
-        term2 = np.array(example-mean)[None]
+    #idx = 0
+    for example in range(len(data)):
+        term2 = np.array(data[example]-mean)[None]
         term1 = np.transpose(term2)
-        cov += np.matmul(term1, term2)
+        cov += responsibilites[example][cluster]*np.matmul(term1, term2)
+    #    idx += 1
 
     return cov
 
@@ -194,10 +222,9 @@ def mv_normal(example, mean, cov):
 def responsibility(example, cluster, means, covs, priors):
     normalization = 0
     #likelihood = mv_normal(example,means[cluster], covs[cluster])
-    #likelihood = multivariate_normal(means[cluster],covs[cluster]).pdf(example)
     likelihood = multivariate_normal.pdf(example,means[cluster],covs[cluster])
     for k in range(len(means)):
-        normalization += priors[k]*multivariate_normal(means[k], covs[k]).pdf(example)
+        normalization += priors[k]*multivariate_normal.pdf(example, means[k], covs[k])
 
     return priors[cluster]*likelihood/normalization
 
@@ -243,7 +270,7 @@ def GMMmaximization(data, responsibilities):
     # calculate new covariance matricies
     covs = list()
     for cluster in range(K):
-        cov = covariance(data, responsibilities, means[cluster])
+        cov = covariance(data, responsibilities, means[cluster], cluster)
         covs.append(cov/Ns[cluster])
 
     # calculate new priors
@@ -252,20 +279,20 @@ def GMMmaximization(data, responsibilities):
         priors.append(Ns[cluster]/len(data))
 
 
+    # display parameters
+    print_params(means,covs,priors)
     return means, covs, priors
 
 
 # calculate log likelihood of the algorithm
 def loglikelihood(data, means, covs, priors):
-    #clusters = list()
     llikelihood = 0
     for example in data:
         posterior = 0
         for cluster in range(K):
-            posterior += priors[cluster]*multivariate_normal(means[cluster],covs[cluster]).pdf(example)
+            posterior += priors[cluster]*multivariate_normal.pdf(example,means[cluster],covs[cluster])
         llikelihood += log(posterior)
     
-    print llikelihood
     return llikelihood
 
 
@@ -278,6 +305,20 @@ def check_bubble_sizes(bubbles, minSize):
             return True
 
     return False
+
+# print parameters
+def print_params(means,covs,priors):
+    print 'Means-\n\n', 
+    for mean in means:
+        print mean, '\n'
+    print 'Covariance Matricies-\n '
+    for cov in covs:
+        for entry in cov:
+            print entry
+        print
+    print 'Priors-\n'
+    for prior in priors:
+        print prior, '\n'
 
 
 ########################################
@@ -311,9 +352,7 @@ for _iter in range(iterations):
         
         # initialize data structures
         prev_centroids = dict(centroids)
-        clusters = {}
-        for centroid in range(K):
-            clusters[centroid] = list()
+        clusters = init_clusters()
 
         # determine the clusters
         expectation(data, centroids, clusters)
@@ -326,64 +365,64 @@ for _iter in range(iterations):
         # check change in distance threshold to determine when to stop
         converged = threshold(centroids, prev_centroids, THRESHOLD)
 
+
+    print 'MSE: ', MSE(clusters, centroids)
     print 'Converged after {} iterations.'.format(times)
+
     
     # display clusters and centroids
-    #plot(centroids, clusters)
+    plot(centroids, clusters)
     
     # clear out centroids, not needed for GMM
     centroids = {}
 
-    ##############################
-    #Start Gaussian Mixture Model
-    ##############################
 
-    reset = True
+##############################
+#Start Gaussian Mixture Model
+##############################
 
-    while reset:
+reset = True
+
+while reset:
+    reset = False
+
+    # inizialize parameters
+    means, covs, priors = GMMinitialize(clusters)
+    
+    times = 0
+    llikelihood = 0
+    llList = list()
+    converged = False
+    # run EM steps MAX_TIMES or until the centroids are finished moving
+    while times < MAX_TIMES and not converged and not reset:
+
+        # initialize data structures for cluster data
+        clusters = init_clusters()
+
+        # caluculate log likelyhood to classify
+        responsibilities = GMMexpectation(data, clusters, means, covs, priors)
+
+        # update parameters
+        means, covs, priors = GMMmaximization(data, responsibilities)
+        
+        # determine log likelihood
+        prev_llikelihood = llikelihood
+        llikelihood = loglikelihood(data, means, covs, priors)
+        llList.append(llikelihood)
+        print ('log likelihood: ', llikelihood)
+        if abs(llikelihood - prev_llikelihood) < THRESHOLD:
+            converged = True
+
+        reset = check_bubble_sizes(clusters, MIN_BUBBLE_EXAMPLES)
         reset = False
+        times += 1
+        #plot_GMM(clusters, means, covs)
 
-        # inizialize parameters
-        means, covs, priors = GMMinitialize(clusters)
+# display parameters
+print_params(means,covs,priors)
     
-        times = 0
-        llikelihood = 0
-        converged = False
-        # run EM steps MAX_TIMES or until the centroids are finished moving
-        while times < MAX_TIMES and not converged and not reset:
+# display clusters and centroids
+plot_llikelihood(llList)
+plot_GMM(clusters, means, covs)
 
-            # initialize data structures for cluster data
-            bubbles = init_clusters()
-
-            # caluculate log likely hood to classify
-            responsibilities = GMMexpectation(data, clusters, means, covs, priors)
-
-            # update parameters
-            means, covs, priors = GMMmaximization(data, responsibilities)
-
-            # determine log likelihood
-            prev_llikelihood = llikelihood
-            llikelihood = loglikelihood(data, means, covs, priors)
-            if abs(llikelihood - prev_llikelihood) < THRESHOLD:
-                converged = True
-
-            reset = check_bubble_sizes(bubbles, MIN_BUBBLE_EXAMPLES)
-
-            times += 1
-
-    # display parameters
-    print 'Means-\n\n', 
-    for mean in means:
-        print mean, '\n'
-    print 'Covariance Matricies-\n '
-    for cov in covs:
-        for entry in cov:
-            print entry
-        print
-    print 'Priors-\n'
-    for prior in priors:
-        print prior, '\n'
-    
-    # display clusters and centroids
-    plot(centroids, bubbles)
 
